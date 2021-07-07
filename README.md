@@ -20,3 +20,6 @@ we need them. Q20 needs.
 However, there is no StoreID column in entire database. 
 Anyway, the problem is not difficult, we just have to use datediff() function. And then in the WHERE clause use the condition as 
 shown in solution.
+
+
+If you are looking at the queries I created for MySQL in the file, you will see that some queries are needlessly large. This is because I directly used subqueries instead of creating a View or Temporary table. So where I could have used just one word, you might see a complete big query. For ex, if you see solution of Question 2, Part 2 is Part 1 except the first two lines. (This was because I avoided creating Views or Temporary Tables)
