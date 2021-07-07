@@ -1,0 +1,1702 @@
+Having database with numerous tables and as a consequence numerous columns, you cannot simply look for a table or column by going through
+the entire database. The following queries help in finding the required tables and columns. Adjust the queries as per your requirements.
+
+1) SHOW TABLES
+2) SELECT DISTINCT TABLE_NAME 
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE COLUMN_NAME IN ('columnA','ColumnB')
+        AND TABLE_SCHEMA='YourDatabase';
+3) SELECT TABLE_NAME, COLUMN_NAME
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE COLUMN_NAME LIKE '%wild%';
+4) SELECT * FROM information_schema.columns WHERE column_name = 'column_name';
+5) SELECT DISTINCT TABLE_NAME, COLUMN_NAME  
+FROM INFORMATION_SCHEMA.COLUMNS  
+WHERE column_name LIKE 'employee%'  
+AND TABLE_SCHEMA='YourDatabase'
+Example - SELECT DISTINCT TABLE_NAME, COLUMN_NAME  
+FROM INFORMATION_SCHEMA.COLUMNS  
+WHERE column_name LIKE 'employee%'  
+AND TABLE_SCHEMA='adventureworks'
+
+Question 1 Solution -
+
+SELECT SalesPersonID, Year(DATE_ADD(OrderDate, interval 6 month)) as FY,   
+quarter(DATE_ADD(OrderDate, interval 6 month)) as FQ, SUM(Subtotal) as FQSales
+FROM SalesOrderHeader
+WHERE OnlineOrderFlag = 0
+GROUP BY SalesPersonID, Year(DATE_ADD(OrderDate, interval 6 month)), quarter(DATE_ADD(OrderDate, interval 6 month));
+
+create view ForQOne as 
+(SELECT SalesPersonID, Year(DATE_ADD(OrderDate, interval 6 month)) as FY,   
+quarter(DATE_ADD(OrderDate, interval 6 month)) as FQ, SUM(Subtotal) as FQSales
+FROM SalesOrderHeader
+WHERE OnlineOrderFlag = 0
+GROUP BY SalesPersonID, Year(DATE_ADD(OrderDate, interval 6 month)), quarter(DATE_ADD(OrderDate, interval 6 month)));
+
+SELECT
+N3.LastName, N1.*, round(N2.FQSales, 2) as SalesSameFQLastYr,
+round((N1.FQSales - N2.FQSales), 2) as Changes,
+round((((N1.FQSales - N2.FQSales)* 100)/N2.FQSales), 2) as PercentChange
+FROM ForQOne N1
+LEFT JOIN ForQOne N2
+ON N1.SalesPersonID = N2.SalesPersonID
+AND N1.FQ = N2.FQ
+AND N1.FY-1 = N2.FY
+JOIN contact N3
+ON N1.SalesPersonID = N3.contactID
+WHERE N1.FY = '2004'
+ORDER BY
+SalesPersonID, FY DESC, FQ DESC
+
+#Solution of Question 1 ends here.
+
+
+Rough Work of Question 1
+#First table with 2001 fiscal year
+
+select salespersonid, 
+case when orderdate between '2001-07-01' and '2002-06-30' then '2001' end as fiscalyear,
+case 
+when orderdate between '2001-07-01' and '2001-09-30' then '1'
+when orderdate between '2001-10-01' and '2001-12-31' then '2'
+when orderdate between '2002-01-01' and '2002-03-31' then '3'
+when orderdate between '2002-04-01' and '2002-06-30' then '4' end 
+as Quarter,
+round(sum(SubTotal),2) as FQSales
+from salesorderheader where OrderDate between '2001-07-01' and '2002-06-30'and OnlineOrderFlag = 0 
+group by SalesPersonID, Quarter 
+order by salespersonid;
+
+#Second table with 2002 fiscal year
+select salespersonid, 
+case when orderdate between '2002-07-01' and '2003-06-30' then '2002' end as fiscalyear,
+case 
+when orderdate between '2002-07-01' and '2002-09-30' then '1'
+when orderdate between '2002-10-01' and '2002-12-31' then '2'
+when orderdate between '2003-01-01' and '2003-03-31' then '3'
+when orderdate between '2003-04-01' and '2003-06-30' then '4' end 
+as Quarter,
+round(sum(SubTotal),2) as FQNextSales
+from salesorderheader where OrderDate between '2002-07-01' and '2003-06-30'and OnlineOrderFlag = 0 
+group by SalesPersonID, Quarter 
+order by salespersonid;
+
+
+#CONNECTION OF THE ABOVE QUERIES  
+# This query should not be so long. I avoided creating a view  You can create a view or temporary table.
+
+select a.SalesPersonID, a.fiscalyear, a.quarter, a.fqsales, b.FQNextSales,
+round((b.fqnextsales - a.fqsales),2) as changesales, round(((b.fqnextsales - a.fqsales)/a.fqsales)*100,2) as percentchange
+ from
+(select salespersonid, 
+case when orderdate between '2001-07-01' and '2002-06-30' then '2001' end as fiscalyear,
+case 
+when orderdate between '2001-07-01' and '2001-09-30' then '1'
+when orderdate between '2001-10-01' and '2001-12-31' then '2'
+when orderdate between '2002-01-01' and '2002-03-31' then '3'
+when orderdate between '2002-04-01' and '2002-06-30' then '4' end 
+as Quarter,
+round(sum(SubTotal),2) as FQSales
+from salesorderheader  where OrderDate between '2001-07-01' and '2002-06-30'and OnlineOrderFlag = 0 
+group by SalesPersonID, Quarter order by salespersonid) a
+
+join
+
+(
+select salespersonid, 
+case when orderdate between '2002-07-01' and '2003-06-30' then '2002' end as fiscalyear,
+case 
+when orderdate between '2002-07-01' and '2002-09-30' then '1'
+when orderdate between '2002-10-01' and '2002-12-31' then '2'
+when orderdate between '2003-01-01' and '2003-03-31' then '3'
+when orderdate between '2003-04-01' and '2003-06-30' then '4' end 
+as Quarter,
+round(sum(SubTotal),2) as FQNextSales
+from salesorderheader where OrderDate between '2002-07-01' and '2003-06-30'and OnlineOrderFlag = 0 
+group by SalesPersonID, Quarter order by salespersonid
+)b
+on a.salespersonid = b.salespersonid and a.quarter = b.quarter
+group by a.fqsales;
+
+
+
+
+
+
+#Question 2 solution
+#PART 1
+Select soh.salesorderid, sp.name as ShipToState, soh.orderdate, soh.SubTotal, soh.Freight,
+Case
+	when soh.Subtotal >= 2000 and soh.subtotal < 2500 THEN 'Increase order to $2,500 and pay $3.2 freight'        #Changing value from 0.22 to 3.2 as 0.22 is too small value
+	WHEN soh.Subtotal >= 2500 THEN 'No order change and pay $3.2 freight'
+	ELSE 'No order change and pay historical freight'
+	end as PromotionalPromoEffect,
+case
+		when soh.SubTotal >= 2000 and soh.subtotal < 2500 then 2500 - soh.SubTotal      #Changing values from 1700 to 2000, and 2000 to 2500 as there were no SubTotal between 1700 and 2000'
+        else 0
+        end as PotentialOrderGain,
+case 
+	when soh.subtotal >= 2000 and soh.subtotal < 2500 then 3.2
+    else soh.Freight
+    end - soh.Freight as PotentialFreightLoss,
+
+case
+	when soh.subtotal >= 2000 and soh.subtotal < 2500 then 2500 - soh.subtotal
+    else 0
+    end
+    +
+case
+	when soh.SubTotal >= 2000 and soh.subtotal < 2500 then 3.2
+    else soh.freight
+    end
+    - soh.freight
+    as PromoNetGainORLoss
+from salesorderheader soh join customeraddress ca on soh.ShipToAddressID = ca.addressid
+join address a on a.addressid = ca.addressid join stateprovince sp on a.StateProvinceID = sp.StateProvinceID
+where soh.OrderDate between '2001-07-01' and '2002-06-30'
+and sp.name = 'California';
+
+
+#PART 2
+
+SELECT
+x.PromotionalPromoEffect, SUM(x.PotentialOrderGain) as PotentialOrderGains, SUM(x.PotentialFreightLoss) as PotentialFreightLosses, SUM(x.PromoNetGainORLoss) as OverallNet
+FROM 
+(Select soh.salesorderid, sp.name as ShipToState, soh.orderdate, soh.SubTotal, soh.Freight,
+Case
+	when soh.Subtotal >= 2000 and soh.subtotal < 2500 THEN 'Increase order to $2,500 and pay $3.2 freight'        #Changing value from 0.22 to 3.2 as 0.22 is too small value
+	WHEN soh.Subtotal >= 2500 THEN 'No order change and pay $3.2 freight'
+	ELSE 'No order change and pay historical freight'
+	end as PromotionalPromoEffect,
+case
+		when soh.SubTotal >= 2000 and soh.subtotal < 2500 then 2500 - soh.SubTotal      #Changing values from 1700 to 2000, and 2000 to 2500 as there were no SubTotal between 1700 and 2000'
+        else 0
+        end as PotentialOrderGain,
+case 
+	when soh.subtotal >= 2000 and soh.subtotal < 2500 then 3.2
+    else soh.Freight
+    end - soh.Freight as PotentialFreightLoss,
+
+case
+	when soh.subtotal >= 2000 and soh.subtotal < 2500 then 2500 - soh.subtotal
+    else 0
+    end
+    +
+case
+	when soh.SubTotal >= 2000 and soh.subtotal < 2500 then 3.2
+    else soh.freight
+    end
+    - soh.freight
+    as PromoNetGainORLoss
+from salesorderheader soh join customeraddress ca on soh.ShipToAddressID = ca.addressid
+join address a on a.addressid = ca.addressid join stateprovince sp on a.StateProvinceID = sp.StateProvinceID
+where soh.OrderDate between '2001-07-01' and '2002-06-30'
+and sp.name = 'California') x
+group by x.PromotionalPromoEffect;
+
+
+
+
+
+#Question 3 solution
+WITH FY2001 AS
+	(SELECT
+
+	2001 as FY, 																#Columns
+	CAST(OrderDate AS DATE) as OrderDat,                                        #You can directly use 'DATE(orderdate) as Orderdate' instead of using CAST.
+	ROW_NUMBER() OVER (ORDER BY SalesOrderID) as OrderNumber,
+	SUM(SubTotal) OVER (ORDER BY Orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as RunningTotal              	
+
+	FROM SalesOrderHeader
+	WHERE date(OrderDate) between '2001-07-01' and '2002-06-30'),
+
+FY2002 AS																		#For 2nd With Clause, you not required to write WITH
+	(SELECT
+
+	2002 as FY, 
+	CAST(OrderDate AS DATE) as OrderDate, 
+	ROW_NUMBER() OVER (ORDER BY SalesOrderID) as OrderNumber,
+	SUM(SubTotal) OVER (ORDER BY Orderdate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as RunningTotal
+
+	FROM SalesOrderHeader
+	WHERE date(OrderDate) between '2002-07-01' and '2003-06-30')
+
+(SELECT * FROM FY2001
+WHERE RunningTotal >= 10000000
+limit 1)   		                                   #it won't work if you don't provide brackets to select statements    
+union
+(SELECT * FROM FY2002
+WHERE RunningTotal >= 10000000
+limit 1);
+
+
+
+
+
+
+
+#Question 4 solution
+
+select dayname(orderdate), sum(subtotal) as revenue, count(*) as numberOForders,
+sum(SubTotal)/count(*) as revperorder from salesorderheader
+where OnlineOrderFlag = 0
+and year(orderdate) = 2002
+group by dayname(orderdate)
+order by revperorder desc;
+
+#If you want to find the number of orders for each day of the week
+
+select 
+
+dayname(orderdate), 
+count(*) as numberOForders                                         #group by will divide the count into days
+
+from salesorderheader
+where OnlineOrderFlag = 0
+and year(orderdate) = 2002
+group by dayname(orderdate);
+
+
+
+
+
+
+#Question 5 solution
+Select 
+     N1.creditcardid, 
+     N1.cardtype, 
+     last_day(date(concat_ws('-', N1.expyear, N1.expmonth, 1))) as lastday ,
+     date(N2.lastorderdate) as LastOrderDate, 
+     count(distinct N3.salesorderid) as OrdersB4Exp, 
+     count(distinct N4.salesorderid) as OrdersAftExp
+from creditcard N1
+left join 
+	(SELECT
+		CreditCardID, 
+		MAX(OrderDate) as LastOrderDate
+	FROM SalesOrderHeader
+	GROUP BY CreditCardID) N2
+	ON N1.CreditCardID = N2.CreditCardID
+		LEFT JOIN SalesOrderHeader N3
+			ON N1.CreditCardID = N3.CreditCardID
+			AND N3.OrderDate <= last_day(date(concat_ws('-', N1.expyear, N1.expmonth, 1)))
+			LEFT JOIN SalesOrderHeader N4
+				ON N1.CreditCardID = N4.CreditCardID
+					AND N4.OrderDate > last_day(date(concat_ws('-', N1.expyear, N1.expmonth, 1)))
+GROUP BY N1.CreditCardID, N1.CardType, N2.LastOrderDate, N1.ExpYear, N1.ExpMonth
+order by OrdersAftExp;
+
+
+
+
+
+
+
+#Question 6 solution
+
+select 
+	p.productid, 
+	p.name, 
+	p.color, 
+	p.listprice, 
+	n1.TotalQty 
+from product p 
+	join 
+(select productid, sum(quantity) as TotalQty from productinventory group by ProductID) n1
+	on p.ProductID = n1.ProductID
+			where p.FinishedGoodsFlag = 1
+				and p.ListPrice >= 1500
+				and n1.TotalQty >= 150
+				and SellEndDate is null;
+
+
+
+
+
+#Question 7 solution
+SELECT
+STH.SalesPersonID, c.LastName, ST.Name as Territory, SOH.yearSales FROM SalesTerritoryHistory STH 
+
+JOIN SalesTerritory ST
+ON STH.TerritoryID = ST.TerritoryID
+
+JOIN contact c
+ON STH.SalesPersonID = C.contactID
+
+JOIN (SELECT SalesPersonID, SUM(Subtotal) as yearSales FROM SalesOrderHeader
+		WHERE YEAR(OrderDate) = 2002
+		GROUP BY SalesPersonID) SOH
+		ON STH.SalesPersonID = SOH.SalesPersonID
+		WHERE STH.EndDate IS NULL 
+        AND ST.Name IN ('Northwest', 'Southwest', 'Canada')
+        order by territory, lastname;
+
+
+
+
+# Question 8 - Solution of Q8 starts from Q7.
+create view SAL as
+(SELECT																				#This view is "Q7 Query + Salary Column"
+STH.SalesPersonID, c.firstname, c.LastName, ST.Name as Territory, SOH.yearSales,
+CASE
+WHEN LastName = 'Eldridge'
+THEN 79500
+WHEN LastName = 'Erickson'
+THEN 60000
+WHEN LastName = 'Eminhizer'
+THEN 59500
+WHEN LastName = 'Espinoza'
+THEN 56000
+WHEN LastName = 'Dyck'
+THEN 68000
+WHEN LastName = 'Elson'
+THEN 80000 END as salary
+	FROM SalesTerritoryHistory STH 
+
+	JOIN SalesTerritory ST
+	ON STH.TerritoryID = ST.TerritoryID
+
+	JOIN contact c
+	ON STH.SalesPersonID = C.contactID
+
+	JOIN (SELECT SalesPersonID, SUM(Subtotal) as yearSales FROM SalesOrderHeader
+	WHERE YEAR(OrderDate) = 2002
+	GROUP BY SalesPersonID) SOH
+	ON STH.SalesPersonID = SOH.SalesPersonID
+	WHERE STH.EndDate IS NULL 
+	AND ST.Name IN ('Northwest', 'Southwest', 'Canada')
+order by territory, lastname);
+
+select * from sal;
+SELECT * FROM sal
+WHERE Territory = 'Canada';
+ SELECT * FROM sal
+WHERE Territory = 'Northwest';
+ SELECT * FROM sal
+WHERE Territory = 'Southwest';
+
+SELECT N1.Salary + N2.Salary + N3.Salary as AggregateSalary,
+N1.yearSales + N2.yearSales + N3.yearSales as AggregateSales,
+N1.Territory as 1stTerritory,
+N1.LastName as 1stSalesPerson,
+N1.yearsales as 1stSalesPersonSales,
+N1.Salary as 1stSalary,
+N2.Territory as 2ndTerritory,
+N2.LastName as 2ndSalesPerson,
+N2.yearSales as 2ndSalesPersonSales,
+N2.Salary as 2ndSalary,
+N3.Territory as 3rdTerritory,
+N3.LastName as 3rdSalesPerson,
+N3.yearSales as 3rdSalesPersonSales,
+N3.Salary as 3rdSalary
+
+from (SELECT * FROM sal
+WHERE Territory = 'Canada') N1
+cross join (SELECT * FROM sal
+WHERE Territory = 'Northwest') N2							#We can use INNER JOIN here without the ON clause. An INNER JOIN without ON clause is CROSS JOIN.
+cross join (SELECT * FROM sal
+WHERE Territory = 'Southwest') N3
+
+where N1.Salary + N2.Salary + N3.Salary < 210000
+order by AggregateSales desc
+limit 1;
+        
+
+
+
+
+
+
+#Question 9 solution
+
+select * from salesorderheader; #Need for Order Date. SalesPersonid;
+select * from SalesOrderDetail;
+select * from product;
+select * from productsubcategory;
+select * from productcategory;
+
+select soh.customerid, soh.salesorderid, pc.name, p.productline, p.productid from salesorderheader soh
+join salesorderdetail sod on soh.salesorderid = sod.SalesOrderID
+join product p on p.ProductID = sod.ProductID
+join productsubcategory psc on p.ProductSubcategoryID = psc.ProductSubcategoryID
+join productcategory pc on  pc.ProductCategoryID = psc.ProductCategoryID;
+
+#PART 1.1
+
+create view productsales as 
+(select soh.customerid, soh.salesorderid, pc.name, p.productline, p.productid from salesorderheader soh
+join salesorderdetail sod on soh.salesorderid = sod.SalesOrderID
+join product p on p.ProductID = sod.ProductID
+join productsubcategory psc on p.ProductSubcategoryID = psc.ProductSubcategoryID
+join productcategory pc on  pc.ProductCategoryID = psc.ProductCategoryID);
+
+set @totalorders = (select count(distinct salesorderid) from productsales);
+
+select @totalorders;
+
+set @BikeAccessoryOrders = 
+(SELECT COUNT(DISTINCT x.SalesOrderID)
+FROM 
+productsales x
+JOIN 
+productsales y
+ON x.SalesOrderID = y.SalesOrderID
+WHERE x.name = 'Bikes'
+AND y.name = 'Accessories');
+
+/* We can also do this instead of SELF JOIN. Infact, Part 1.2 is done this way. 
+
+SELECT COUNT(*) FROM 
+(select salesorderid
+from productsales
+group by salesorderid
+having
+sum(case when name = 'Bikes' then 1 else 0 end) >= 1
+and
+sum(case when name = 'Accessories' then 1 else 0 end) >= 1)n;
+
+*/
+
+select @BikeAccessoryOrders;
+
+SELECT concat(round((@BikeAccessoryOrders / @TotalOrders)*100, 2), '%') as BikeAndAccessory;
+
+#PART 1.2
+
+set @bikeclothingorders = 
+
+(select COUNT(*) FROM
+	(SELECT  SalesOrderID
+	FROM ProductSales
+	GROUP BY SalesOrderID
+	HAVING
+	SUM(CASE WHEN name = 'Bikes' THEN 1 ELSE 0 END) >= 1
+	AND SUM(CASE WHEN name = 'Clothing' THEN 1 ELSE 0 END) >= 2)
+X1);
+
+select @bikeclothingorders;
+
+SELECT concat(round((@BikeClothingOrders / @TotalOrders)*100, 2), '%') as BikeAndAccessory;
+
+
+
+# PART 2
+
+SELECT * FROM                                                              #Product Sales is our view
+(SELECT DISTINCT
+SalesOrderID, name, 1 as Cnt
+FROM ProductSales) N1;
+
+select salesorderid,
+sum(case when name = 'Bikes' then 1 else 0 end) as Bikes,											#PIVOTING
+sum( case when name = 'Accessories' then 1 else 0 end) as Accessories,
+sum( case when name = 'Clothing' then 1 else 0 end) as Clothing,
+sum( case when name = 'Components' then 1 else 0 end) as Components,
+count(*)
+from 
+	(SELECT * FROM
+	(SELECT DISTINCT
+	SalesOrderID, name, 1 as Cnt																			
+	FROM ProductSales) N1)N2
+group by salesorderid
+;
+
+select Bikes, Accessories, Components, Clothing, Sum(cnt) from 
+	(
+	select salesorderid,
+	sum(case when name = 'Bikes' then 1 else 0 end) as Bikes,
+	sum( case when name = 'Accessories' then 1 else 0 end) as Accessories,
+	sum( case when name = 'Clothing' then 1 else 0 end) as Clothing,
+	sum( case when name = 'Components' then 1 else 0 end) as Components,
+	count(*) as cnt
+	from 
+        (SELECT * FROM
+		(SELECT DISTINCT
+		SalesOrderID, name, 1 as Cnt																			
+		FROM ProductSales) N1)N2
+	group by salesorderid)N3
+GROUP BY Bikes, Accessories, Components, Clothing
+ORDER BY Bikes, Accessories, Components, Clothing
+;
+
+
+
+# PART 3 (The Process of this part is same as Part 2
+
+SELECT DISTINCT CustomerID, ProductLine, 1 as Cnt FROM ProductSales;
+
+select customerid, 
+sum(case when productline = 'M' then 1 else 0 end) as M,
+sum(case when productline = 'S' then 1 else 0 end) as S,
+sum(case when productline = 'T' then 1 else 0 end) as T,
+sum(case when productline = 'R' then 1 else 0 end) as R,
+count(*)
+from
+(SELECT DISTINCT CustomerID, ProductLine, 1 as Cnt FROM ProductSales)N1
+group by customerid;
+
+
+select M, S, T, R, sum(cnt) from
+(
+select customerid, 
+sum(case when productline = 'M' then 1 else 0 end) as M,
+sum(case when productline = 'S' then 1 else 0 end) as S,
+sum(case when productline = 'T' then 1 else 0 end) as T,
+sum(case when productline = 'R' then 1 else 0 end) as R,
+count(*) as cnt
+from
+(SELECT DISTINCT CustomerID, ProductLine, 1 as Cnt FROM ProductSales)N1
+group by customerid) N2
+group by M, S, T, R
+order by M, S, T, R;
+
+
+
+
+
+
+
+
+
+#Question 11 solution
+
+select * from salestaxrate; # has tax rate. state province id.
+select * from stateprovince; # state province id. state province code. countryregion code. 
+select * from countryregion; # countryregion code. name of the country.
+
+select cr.countryregioncode, cr.name, cr.CountryRegionCode, max(st.TaxRate) from countryregion cr 
+join stateprovince sp on cr.CountryRegionCode = sp.CountryRegionCode
+join salestaxrate st on sp.StateProvinceID = st.StateProvinceID
+group by cr.CountryRegionCode;
+
+
+#Question 12 solution
+
+select * from productinventory;
+select coalesce(locationID,'TOTAL'), LocationID, COUNT(DISTINCT ProductID), sum(quantity) from productinventory group by LocationID 		#With Rollup is the main part
+WITH ROLLUP;
+select coalesce(locationID,'TOTAL'), COUNT(DISTINCT ProductID), sum(quantity) from productinventory group by LocationID 
+with rollup;
+
+
+
+
+# Question 13 solution
+select * from employee;
+select * from contact;
+
+WITH MaxVacHrs AS
+(SELECT MAX(VacationHours) as MaxVacHrs FROM Employee)
+SELECT RIGHT(e.NationalIDNumber, 4) as NationalID, c.FirstName, c.LastName, e.Title, e.VacationHours
+FROM Employee e
+JOIN contact c
+ON e.employeeID = c.contactID
+INNER JOIN MaxVacHrs M ON e.VacationHours = m.MaxVacHrs;
+
+# Alternate solution.
+select right(e.NationalIDNumber, 4) as NationalID, c.FirstName, c.LastName, e.Title,
+MAX(e.VacationHours) AS VACHOURS 
+from Employee e 
+join contact c
+on e.employeeID = c.ContactID
+group by right(e.NationalIDNumber, 4), c.FirstName, c.LastName, e.Title
+having MAX(e.VacationHours)=(select max(e.VacationHours) from Employee e);
+
+
+
+
+
+
+#Question 15 solution
+
+select pm.productmodelid, pm.name, pd.description, c.name from productmodel pm
+join productmodelproductdescriptionculture pmpdc on pm.ProductModelID = pmpdc.ProductModelID
+join productdescription pd on pd.ProductDescriptionID = pmpdc.ProductDescriptionID
+join culture c on pmpdc.CultureID = c.CultureID
+where c.CultureID <> 'en';
+
+
+
+
+
+
+
+
+#Question 16 solution
+select territoryid, count(*) as TotalOrders, OnlineOrderFlag as Online from salesorderheader 
+where onlineorderflag = 1
+group by territoryid
+order by territoryid;
+
+select territoryid, count(*) as TotalOrders, OnlineOrderFlag as Online from salesorderheader 
+group by territoryid
+order by territoryid;
+
+select territoryid, count(*) as TotalOrders, 
+round((sum(case when OnlineOrderFlag = 1 then 1 else 0 end)/count(*))*100,0) as OnlineOrders,
+round((sum(case when OnlineOrderFlag = 0 then 1 else 0 end)/count(*))*100,0) as OfflineOrders
+from salesorderheader 
+group by territoryid
+order by territoryid;
+
+
+
+
+
+
+# Question 18 solution
+
+select p.productid, p.name, ps.name as Subcategory, min(ph.standardcost), max(ph.standardcost), round(max(ph.standardcost) - min(ph.standardcost), 2) as difference,
+case
+when max(ph.standardcost) - min(ph.standardcost) = 0 then 0
+else 
+dense_rank() over (order by max(ph.standardcost) - min(ph.standardcost) desc) 
+end as CostVarRank
+from product p join productsubcategory ps on p.ProductSubcategoryID = ps.ProductSubcategoryID
+join productcosthistory ph on ph.ProductID = p.ProductID
+group by ph.ProductID, p.name, ps.name;
+
+
+
+
+
+
+
+
+
+# Question 19 solution
+
+select * from scrapreason;
+select * from product;
+select * from workorder;
+
+With temp as 
+	( select row_number() over (partition by w.productid order by count(p.name) desc) as Rnk,
+	w.productid,
+	p.name as productname, 
+	count(p.name) as workordercount,
+	sr.name as scrapreason
+	from workorder w
+	join product p on w.ProductID = p.ProductID
+	join scrapreason sr on w.ScrapReasonID = sr.ScrapReasonID
+	group by w.ProductID, p.name, sr.name)
+
+select rnk, productid, productname, workordercount, scrapreason from temp
+order by workordercount desc;
+
+# Answer/ Upper query is for understanding
+With temp as 
+	( select row_number() over (partition by w.productid order by count(p.name) desc) as Rnk,				
+	w.productid,																							
+	p.name as productname, 
+	count(p.name) as workordercount,
+	sr.name as scrapreason
+	from workorder w
+	join product p on w.ProductID = p.ProductID
+	join scrapreason sr on w.ScrapReasonID = sr.ScrapReasonID
+	group by w.ProductID, p.name, sr.name)
+
+select productid, productname, workordercount, scrapreason from temp where rnk = 1
+order by workordercount desc;
+
+
+
+
+
+# Question 20 solution
+
+SELECT DISTINCT TABLE_NAME, column_name 
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE table_NAME like ('%address')
+        AND TABLE_SCHEMA ='adventureworks';
+        
+select * from vendoraddress;
+select * from address;
+select * from addresstype;
+select * from store;
+
+select 
+at.name as AddressType, s.name as StoreName, a.addressline1, a.addressline2, a.city, sp.name as StateProvince,
+a.postalcode
+from vendoraddress va
+join address a on a.addressid = va.addressid
+join addresstype at on va.addresstypeid = at.addresstypeid
+join store s on [va.BusinessEntityID = s.BusinessEntityID]				# Now neither the store table has BusinessEntityId, neither VendorAddress table has it. Therefore we cannot this query.
+join stateprovince sp on sp.stateprovinceid = a.stateprovinceid
+where at.name = 'Main office' and a.city = 'Toronto';
+
+
+
+
+
+
+
+# Question 21 solution
+
+select * from employeedepartmenthistory;
+select * from department;
+select * from contact;
+select * from employee;
+
+select x.firstname, x.lastname, x.jobtitle, x.birthdate, x.maritalstatus, x.hiredate
+from
+	(select c.firstname, c.lastname, e.Title as jobtitle, e.birthdate, e.maritalstatus, e.hiredate, eh.DepartmentID, d.name as departmentname
+
+	from contact c
+	join employee e on c.ContactID = e.ContactID
+	join employeedepartmenthistory eh on e.EmployeeID = eh.EmployeeID
+	join department d on eh.DepartmentID = d.DepartmentID
+	where d.name = 'Marketing' and eh.EndDate is null
+	having year(e.HireDate) < '1999' or year(e.hiredate) > '2000') x;
+
+
+
+
+
+
+
+
+
+
+# Question 22 solution
+
+/* We cannot obtain the solution because we do not have the EmailAddress table. The question only asks if the reviewers can be connected to our existing database.
+In the productreview table, there's a data about people who reviewed some products. We just want to match the email IDs from these table to the email IDs
+in the EmailAddress table(We do not have these table) using LEFT JOIN.
+According to the solution, there's no output. THerefore, there's no connection which was asked in the question. */
+
+
+
+
+
+
+
+# Question 23 solution
+select * from salesorderdetail;
+select * from product;
+select * from salesorderheader;
+select * from customer;
+select * from contact;
+
+select sod.salesorderID, soh.orderdate, p.name as ProductName, c.firstname, c.lastname, c.phone
+
+from salesorderdetail sod join salesorderheader soh on soh.salesorderID = sod.salesorderID
+join product p on p.productid = sod.productid
+join customer cx on soh.CustomerID = cx.CustomerID
+join contact c on cx.CustomerID = c.ContactID					# Customer and Contact tables do not have a common column(In our database). This is just for execution. 
+where p.name like '%shorts%'									# Our database do not have the required columns in Contact table. 
+and soh.OrderDate > '2002-07-07'
+and soh.OnlineOrderFlag = 1
+order by SalesOrderID;
+
+
+
+
+
+
+
+
+# Question 24 solution
+
+select * from contact;
+with email as
+	(select contactid, emailaddress,
+    case 
+    when emailpromotion = 0 then 'Contact does not wish to receive e-mail promotions'
+    when emailpromotion = 1 then 'Contact does wish to receive e-mail promotions from Adventure works'
+    when emailpromotion = 2 then 'Contact does wish to receive e-mail promotions from Adventure works and selected partners'
+    end as EmailPref
+    from contact)
+ Select EmailPref, count(*) from Email
+ group by EmailPref
+ order by count(*) desc;
+ 
+
+
+
+
+# Question 25 solution
+
+with TerritoryRank AS
+(SELECT YEAR(DATE_ADD(N1.OrderDate, interval 6 month)) as FY, N2.Name as Territory, SUM(N1.SubTotal) as Revenue,
+DENSE_RANK() OVER (PARTITION BY YEAR(DATE_ADD(N1.OrderDate, interval 6 month)) ORDER BY SUM(N1.Subtotal) DESC) as TerritoryRank
+FROM SalesOrderHeader N1
+JOIN SalesTerritory N2
+ON N1.TerritoryID = N2.TerritoryID
+GROUP BY YEAR(DATE_ADD(N1.orderdate, interval 6 month)), N2.Name)
+
+SELECT * FROM TerritoryRank
+WHERE FY IN (2002, 2003) AND TerritoryRank IN (1, 2)
+ORDER BY FY, TerritoryRank;
+
+
+
+# Question 26 solution
+
+select * from salesorderheader;
+select * from salesperson;
+
+Select salespersonId, commissionpct, bonus,
+dense_rank() over (order by commissionpct desc) as rnk
+from salesperson
+order by rnk asc, bonus desc;
+
+Select salespersonId, commissionpct, bonus,                                 
+dense_rank() over (order by commissionpct desc, bonus desc) as rnk          
+from salesperson; 
+
+
+
+
+
+
+
+# Question 27 solution
+
+select * from workorder;
+select ProductID, count(*) from workorder 
+group by ProductID
+order by count(*) desc;
+
+select p.name as productname, count(*) from workorder w
+join product p on p.ProductID = w.ProductID
+group by p.name
+order by count(*) desc;
+
+
+
+
+
+
+# Question 28 solution
+
+select * from salesorderheader;
+set @StartDate = '2003-05-01';
+set @EndDate = '2003-05-23';
+
+# Part 1 solution
+SELECT DATEDIFF(@EndDate, @StartDate) + 1 as DaysInMonthSoFar,
+SUM(SubTotal) as RevenueInMonthSoFar,
+(SUM(SubTotal)/(DATEDIFF(@EndDate, @StartDate) + 1)) as RevPerDayforMonthSoFar,
+DAY(last_day(@StartDate)) as DaysinMonth,
+SUM(SubTotal)/(DATEDIFF(@EndDate, @StartDate) + 1) * DAY(last_day(@StartDate)) as MonthlyRevTrended
+FROM SalesOrderHeader
+WHERE OrderDate BETWEEN @StartDate AND @EndDate;   				# RevenueInMonthSoFar is calculated based on this WHERE statement. It has nothing to do with DATEDIFF.
+
+# Part 2 solution
+SELECT
+SUM(SubTotal)/DAY(last_day(@StartDate)) as ActualPerDay,
+SUM(Subtotal) as ActualRev
+FROM SalesOrderHeader
+WHERE OrderDate BETWEEN @StartDate AND last_day(@EndDate);
+
+
+
+
+
+
+
+# Question 29 solution
+select employeeid, loginid, 
+locate( 'adventure-works', loginid), 
+locate('k', loginid),
+locate('k', loginid, 15),
+locate('\\', loginid)
+from employee;
+
+SELECT employeeid, LoginID,										#Answer
+LEFT (LoginID, locate('\\', LoginID) - 1) as domain,
+RIGHT (LoginID, length(LoginID) - locate('\\', LoginID)) as UserName
+FROM Employee
+ORDER BY employeeID;
+
+
+
+
+
+
+
+
+# Question 30 solution
+
+select * from employeedepartmenthistory;
+select * from department;
+select * from shift;
+select d.name as departmentname, s.name as shiftname, count(*)
+from employeedepartmenthistory edh 
+join department d on d.departmentid = edh.departmentid
+join shift s on s.shiftid = edh.shiftid
+where d.name = 'Production'
+and edh.EndDate is Null
+group by s.name;
+
+
+
+
+# Question 31
+# Alpha sizing is the size range named by letters such as XS, S, M, L, XL, etc.
+
+select * from product;
+select * from productinventory;
+select size from product;
+
+# Part 1 solution
+select distinct size from product
+where size REGEXP '^-?[0-9]+$' and size is not null;		
+select distinct size from product
+where size not REGEXP '^-?[0-9]+$' and size is not null;		#This is our solution query. I have yet to understand the part '^-?[0-9]+$'.
+ 
+
+# Part 2 solution
+select p.size, sum(pi.quantity),
+case 
+		when sum(pi.quantity) - 1000 < 0 then 0
+        else sum(pi.quantity) - 1000
+        end as AdditonalLabelsNeeded
+from product p
+join productinventory pi on p.ProductID = pi.ProductID
+where p.size not REGEXP '^-?[0-9]+$' and p.size is not null
+group by p.size;
+
+
+
+# Question 32 solution
+
+select * from employee;
+
+#Part 1 solution
+select count(*) as NumberEmployees, 
+round(((sum(case when gender = 'M' then 1 else 0 end)/count(*))*100), 2) as Male,
+round(((sum(case when gender = 'F' then 1 else 0 end)/count(*))*100), 2) as FeMale,
+avg(timestampdiff(month, hiredate, '2004-01-01')) as AvgMonthsEmployed   			#Note - It is important to mention '2003-01-01' in this format as hiredate has this format
+ from employee;
+
+#Part 2 solution
+SELECT EmployeeID, 
+ntile (4) over (ORDER BY timestampdiff(month, HireDate, '2004-01-01')) as Quartile, HireDate, 
+timestampdiff(month, hireDate, '2004-01-01') as MonthsEmployed, Gender FROM Employee;
+ 
+#Note - The quartile is based on Average Number of Months Employed as mentioned in the question and not financial quarters. Therefore, we are using NTILE function.
+#For more information in NTILE function, search web.
+select x.Quartile, count(*) as NumberEmployees, 
+round(((sum(case when gender = 'M' then 1 else 0 end)/count(*))*100), 2) as Male,
+round(((sum(case when gender = 'F' then 1 else 0 end)/count(*))*100), 2) as FeMale,
+avg(x.MonthsEmployed) as AvgMonthsEmployed
+from
+	( select EmployeeID, ntile (4) over (ORDER BY timestampdiff(month, HireDate, '2004-01-01')) as Quartile, HireDate, 
+      timestampdiff(month, HireDate, '2004-01-01') as MonthsEmployed, Gender FROM Employee) x
+group by x.Quartile;
+
+
+
+
+
+
+#Question 33 solution
+
+select * from employee;
+select * from employeepayhistory;
+
+
+select e.title, 
+case
+when timestampdiff(year, e.birthdate, '2004-01-01') < 18 then '< 18'
+when timestampdiff(year, e.birthdate, '2004-01-01') between 18 and 35 then '18 - 35'
+when timestampdiff(year, e.birthdate, '2004-01-01') between 36 and 50 then '36 - 50'
+when timestampdiff(year, e.birthdate, '2004-01-01') between 51 and 60 then '51 - 60'
+when timestampdiff(year, e.birthdate, '2004-01-01') > 61 then '61 +'
+end as Agegroup,
+eph.rate as Payrate,
+count(*) as NumberOfEmployees
+from employee e
+join employeepayhistory eph on e.EmployeeID = eph.EmployeeID
+join
+(select EmployeeID, MAX(RateChangeDate) as RateChangeDate from employeepayhistory		#It was necessary to perform this join otherwise it would have assigned random payrate.
+group by employeeID) x
+on eph.EmployeeID = x.EmployeeID and eph.RateChangeDate = x.RateChangeDate
+GROUP BY
+Title, Rate, AgeGroup;
+
+
+
+
+
+
+#Question 34 solution
+select * from salesorderheader;
+select * from stateprovince;
+select * from address;
+
+select '2002' as Year, sp.stateprovinceID, sp.name, round(sum(soh.totaldue), 2) from
+salesorderheader soh join address a on a.addressID = soh.shiptoaddressId
+join stateprovince sp on sp.stateprovinceid  =  a.stateprovinceID
+where orderdate between '2002-07-01' and '2003-06-30'					
+group by StateProvinceID
+order by sum(soh.totaldue) desc;
+
+
+
+
+
+
+
+#Question 35 solution
+#The employee table doesn't include the OrganizationalLevel column. Still the solution.
+DROP VIEW Employee_Bicycle_Giveaway;
+CREATE VIEW Employee_Bicycle_Giveaway as
+SELECT c.FirstName, c.LastName, e.Title FROM Employee e 
+JOIN contact c ON e.BusinessEntityID = c.BusinessEntityID
+WHERE e.OrganizationLevel = (SELECT MAX (OrganizationLevel) FROM Employee)
+ORDER BY NEWID();
+
+
+
+
+
+
+
+#Question 36 solution
+select * from salesorderdetail;
+select * from specialoffer;
+select * from salesorderheader;
+
+select sod.salesorderId, soh.orderdate, sum(sod.unitpricediscount * sod.unitprice * sod.OrderQty) as TotalVolumeDiscount
+from salesorderdetail sod join specialoffer so on sod.SpecialOfferID = so.SpecialOfferID
+join salesorderheader soh on soh.SalesOrderID = sod.SalesOrderID
+where so.type = 'Volume Discount'
+group by sod.SalesorderID, so.type, soh.OrderDate
+having sum(sod.unitpricediscount * sod.unitprice * sod.OrderQty) > 0;
+
+#Part 1 solution
+select * from
+(select sod.salesorderId, soh.orderdate, sum(sod.UnitPriceDiscount * sod.unitprice * sod.OrderQty) as TotalVolumeDiscount
+from salesorderdetail sod join specialoffer so on sod.SpecialOfferID = so.SpecialOfferID
+join salesorderheader soh on soh.SalesOrderID = sod.SalesOrderID
+where so.type = 'Volume Discount'
+group by sod.SalesorderID, so.type, soh.OrderDate
+having sum(sod.UnitPriceDiscount * sod.unitprice * sod.OrderQty) > 0) x
+order by x.SalesOrderID;
+
+#Part 2 solution
+SELECT YEAR(OrderDate) as OrderYear, SUM(TotalVolumeDiscount) as TotalVolumeDiscount
+FROM 
+(select sod.salesorderId, soh.orderdate, sum(sod.UnitPriceDiscount * sod.unitprice * sod.OrderQty) as TotalVolumeDiscount
+from salesorderdetail sod join specialoffer so on sod.SpecialOfferID = so.SpecialOfferID
+join salesorderheader soh on soh.SalesOrderID = sod.SalesOrderID
+where so.type = 'Volume Discount'
+group by sod.SalesorderID, so.type, soh.OrderDate
+having sum(sod.UnitPriceDiscount * sod.unitprice * sod.OrderQty) > 0) x
+GROUP BY YEAR(OrderDate);
+
+
+
+
+
+#Question 37 solution
+select * from productvendor;
+select productID, max(lastreceiptcost) as MostExpensivePrice from productvendor group by productID;
+
+select x.ProductID, 
+max(x.MostExpensivePrice) as MostExpensivePrice, 
+max(x.SecondMostExpensivePrice) as SecondMostExpensivePrice,
+round((max(x.MostExpensivePrice) - max(x.SecondMostExpensivePrice))/max(x.SecondMostExpensivePrice), 2)
+from
+	(
+    select 
+	y.ProductID,
+	CASE WHEN y.rownum = 1 THEN y.LastReceiptCost ELSE NULL END as MostExpensivePrice,
+	CASE WHEN y.rownum = 2 THEN y.LastReceiptCost ELSE NULL END as SecondMostExpensivePrice
+	from 
+		(		select ProductID, LastReceiptCost,
+				ROW_NUMBER() over (partition by ProductID order by LastReceiptCost DESC) as rownum
+				from ProductVendor) y ) x
+group by x.ProductID
+having MAX(x.SecondMostExpensivePrice) IS NOT NULL;
+
+
+
+
+
+
+
+
+#Question 38 solution
+
+select * from product;
+select * from productcategory;
+select * from productsubcategory;
+select * from productmodel;
+
+select p.ProductModelId, pm.Name, Round(((p.listprice - p.standardcost)*100)/p.standardcost, 2) as ProfitMargin
+from product p join productsubcategory psc on p.ProductSubcategoryID = psc.ProductSubcategoryID
+join productcategory pc on pc.ProductCategoryID = psc.ProductCategoryID
+join productmodel pm on pm.ProductModelID = p.ProductModelID
+where pc.name = 'Bikes' and p.SellEndDate is null
+group by p.productmodelid, pm.name, ProfitMargin
+order by ProfitMargin desc;
+
+
+
+
+
+
+
+#Question 39 solution
+
+select * from salespersonquotahistory;
+select * from salesorderheader;
+
+#Part 1 solution
+select qh.salespersonID, qh.QuotaDate, qh.SalesQuota, sum(soh.subtotal) as ActualSales, round(((sum(soh.subtotal)/qh.SalesQuota)), 2) as PercentToQuota
+from salespersonquotahistory qh left join salesorderheader soh on soh.SalesPersonID = qh.SalesPersonID			#i don't think left join or inner join matters here.
+where soh.orderdate >= qh.QuotaDate and soh.OrderDate < adddate(qh.quotadate, interval 3 month)              	#This where statement is to include only those orders in the quarter.
+group by qh.salespersonID, qh.QuotaDate         	#We Grouped by QuotaData because we want quarter report.
+order by qh.SalesPersonID, qh.quotadate;				
+
+#Part 2 solution
+select x.salespersonID, year(x.QuotaDate), sum(x.SalesQuota), round(sum(x.ActualSales), 2), round(SUM(ActualSales)/SUM(SalesQuota), 2), avg(PercentToQuota)
+from 
+(select qh.salespersonID, qh.QuotaDate, qh.SalesQuota, sum(soh.subtotal) as ActualSales, round(((sum(soh.subtotal)/qh.SalesQuota)), 2) as PercentToQuota
+from salespersonquotahistory qh left join salesorderheader soh on soh.SalesPersonID = qh.SalesPersonID			
+where soh.orderdate >= qh.QuotaDate and soh.OrderDate < adddate(qh.quotadate, interval 3 month)              	
+group by qh.salespersonID, qh.QuotaDate         	
+order by qh.SalesPersonID, qh.quotadate) x
+group by x.SalesPersonID, year(x.QuotaDate)
+order by x.SalesPersonID, year(x.QuotaDate);
+
+
+
+
+
+
+#Question 40 solution
+
+#Solution
+select * from salesorderheader;
+select 
+case 
+	when totaldue < 100 then 1
+    when totaldue between 100 and 500 then 2
+    when totaldue between 500 and 1000 then 3
+    when totaldue between 1000 and 2500 then 4
+    when totaldue between 2500 and 5000 then 5
+    when totaldue between 5000 and 10000 then 6
+    when totaldue between 10000 and 50000 then 7
+    when totaldue between 50000 and 100000 then 8
+    when totaldue > 100000 then 9
+    end as SortID,
+case 
+	when totaldue < 100 then '0-100'
+    when totaldue between 100 and 500 then '100-500'
+    when totaldue between 500 and 1000 then '500-1000'
+    when totaldue between 1000 and 2500 then '1000-2500'
+    when totaldue between 2500 and 5000 then '2500-5000'
+    when totaldue between 5000 and 10000 then '5000-10000'
+    when totaldue between 10000 and 50000 then '10000-50000'
+    when totaldue between 50000 and 100000 then '50000-100000'
+    when totaldue > 100000 then '>100000'
+    end as SalesAmountCategory,
+count(*) as NumberOfOrders   
+from salesorderheader
+where year(orderdate) = 2003
+group by sortID
+order by SortID;
+
+
+#Alternate Solution
+SELECT
+CASE
+	WHEN TotalDue < 100 THEN 1
+	WHEN TotalDue < 500 THEN 2
+	WHEN TotalDue < 1000 THEN 3
+	WHEN TotalDue < 2500 THEN 4
+	WHEN TotalDue < 5000 THEN 5
+	WHEN TotalDue < 10000 THEN 6
+	WHEN TotalDue < 50000 THEN 7
+	WHEN TotalDue < 100000 THEN 8
+	ELSE 9
+	END as SortID, 
+CASE
+	WHEN TotalDue < 100 THEN '0 - 100'
+	WHEN TotalDue < 500 THEN '100 - 500'
+	WHEN TotalDue < 1000 THEN '500 - 1,000'
+	WHEN TotalDue < 2500 THEN '1,000 - 2,500'
+	WHEN TotalDue < 5000 THEN '2,500 - 5,000'
+	WHEN TotalDue < 10000 THEN '5,000 - 10,000'
+	WHEN TotalDue < 50000 THEN '10,000 - 50,000'
+	WHEN TotalDue < 100000 THEN '50,000 - 100,000'
+	ELSE '> 100000'
+END as SalesAmountCategory,
+count(*) as NumberOfOrders FROM SalesOrderHeader
+WHERE YEAR(OrderDate) = 2003
+GROUP BY SortID
+order by SortID;
+
+
+
+
+
+
+
+
+
+#Question 41 solution
+#Our dataset is different. Therefore, differences.
+
+SELECT DISTINCT TABLE_NAME, COLUMN_NAME  			#To find customertype column
+FROM INFORMATION_SCHEMA.COLUMNS  
+WHERE column_name LIKE '%type'  
+AND TABLE_SCHEMA = 'adventureworks';
+
+#Actual Solution
+select cx.CustomerType,
+sum(case
+	when con.emailaddress like '%works.com' then 1
+    else 0
+    end) as Works,
+sum(case
+	when con.emailaddress not like '%works.com' then 1
+    else 0
+    end) as OtherEMail,
+    count(con.EmailAddress)
+from customer cx 
+join contact con on cx.CustomerID = con.ContactID					#CustomerID and COntactID are not same but we get the idea. Therefore, it's okay.
+group by cx.CustomerType;											#COntactId could be of employees.
+
+
+
+
+
+
+
+# Question 42 solution
+select * from salesorderheader;
+
+#Solution using WITH clause
+WITH SalesGrouping AS
+(SELECT SalesPersonID, SUM(SubTotal) as SalesTotal,
+ROW_NUMBER() OVER (ORDER BY SUM(Subtotal) DESC) as SalesRankSubTotalDESC,
+ROW_NUMBER () OVER (ORDER BY SUM(Subtotal)) as SalesRankSubTotalASC
+FROM SalesOrderHeader
+WHERE YEAR(OrderDate) = 2003
+AND SalesPersonID IS NOT NULL
+GROUP BY SalesPersonID)
+select x.salespersonID as SuccessfulSalesPerson, x.salestotal as successfulrevenue, y.salespersonID as unsuccessfulSalesPerson, y.salestotal as unsuccessfulrevenue
+from salesgrouping x
+join salesgrouping y on x.SalesRankSubTotalDESC = y.SalesRankSubTotalASC     #THis join is the crux of the solution
+order by x.SalesRankSubTotalDESC
+limit 5;
+
+#Solution using Inline query
+select x.salespersonID as SuccessfulSalesPerson, x.salestotal as successfulrevenue, y.salespersonID as unsuccessfulSalesPerson, y.salestotal as unsuccessfulrevenue
+from
+(SELECT SalesPersonID, SUM(SubTotal) as SalesTotal,
+ROW_NUMBER() OVER (ORDER BY SUM(Subtotal) DESC) as SalesRankSubTotalDESC,
+ROW_NUMBER () OVER (ORDER BY SUM(Subtotal)) as SalesRankSubTotalASC
+FROM SalesOrderHeader
+WHERE YEAR(OrderDate) = 2003
+AND SalesPersonID IS NOT NULL
+GROUP BY SalesPersonID) x
+join
+(SELECT SalesPersonID, SUM(SubTotal) as SalesTotal,
+ROW_NUMBER() OVER (ORDER BY SUM(Subtotal) DESC) as SalesRankSubTotalDESC,
+ROW_NUMBER () OVER (ORDER BY SUM(Subtotal)) as SalesRankSubTotalASC
+FROM SalesOrderHeader
+WHERE YEAR(OrderDate) = 2003
+AND SalesPersonID IS NOT NULL
+GROUP BY SalesPersonID) y
+on x.SalesRankSubTotalDESC = y.SalesRankSubTotalASC					#THis join is the crux of the solution
+order by x.SalesRankSubTotalDESC
+limit 5;
+
+#Solution in the word file
+select a.SalesPersonID,a.Revenue,b.SalesPersonID,b.Revenue
+from
+(select a.SalesPersonID, sum(a.SubTotal) as Revenue,
+row_number() over (order by sum(a.Subtotal) desc) as TOP_RN
+from SalesOrderHeader a
+where YEAR(a.orderdate) = 2003 and a.SalesPersonID is NOT NULL
+group by a.SalesPersonID) a
+join 
+(select a.SalesPersonID, sum(a.SubTotal) as Revenue,
+row_number() over (order by sum(a.Subtotal)) as BOTTOM_RN
+from SalesOrderHeader a
+where YEAR(a.orderdate)=2003 and a.SalesPersonID is NOT NULL
+group by a.SalesPersonID) b
+on a.TOP_RN=b.BOTTOM_RN 
+where a.TOP_RN<=5 and b.BOTTOM_RN<=5;
+
+
+
+
+
+# Question 43 solution
+# Solution from https://gist.github.com/bryhal/4129042
+
+DROP TABLE IF EXISTS dates;
+CREATE TABLE dates (
+idDate INTEGER PRIMARY KEY, -- year10000+month100+day
+fulldate DATE NOT NULL,
+year INTEGER NOT NULL,
+month INTEGER NOT NULL, -- 1 to 12
+day INTEGER NOT NULL, -- 1 to 31
+quarter INTEGER NOT NULL, -- 1 to 4
+week INTEGER NOT NULL, -- 1 to 52/53
+dayOfWeek INTEGER NOT NULL, -- 1 to 7
+weekend INTEGER NOT NULL,
+UNIQUE td_ymd_idx (year,month,day),
+UNIQUE td_dbdate_idx (fulldate)
+
+) Engine=innoDB;
+
+
+DROP PROCEDURE IF EXISTS fill_date_dimension;
+DELIMITER //
+
+CREATE PROCEDURE fill_date_dimension(IN startdate DATE,IN stopdate DATE)
+BEGIN
+DECLARE currentdate DATE;
+SET currentdate = startdate;
+WHILE currentdate < stopdate DO
+INSERT INTO dates VALUES (
+YEAR(currentdate)*10000+MONTH(currentdate)*100 + DAY(currentdate),
+currentdate,
+YEAR(currentdate),
+MONTH(currentdate),
+DAY(currentdate),
+QUARTER(currentdate),
+WEEKOFYEAR(currentdate),
+CASE DAYOFWEEK(currentdate)-1 WHEN 0 THEN 7 ELSE DAYOFWEEK(currentdate)-1 END ,
+CASE DAYOFWEEK(currentdate)-1 WHEN 0 THEN 1 WHEN 6 then 1 ELSE 0 END);
+SET currentdate = ADDDATE(currentdate,INTERVAL 1 DAY);
+END WHILE;
+END
+//
+DELIMITER ;
+
+TRUNCATE TABLE dates;
+
+select *,
+case when dayOfWeek = 7 then 'Sunday'
+when dayOfWeek = 1 then 'Monday'
+when dayOfWeek = 2 then 'Tuesday'
+when dayOfWeek = 3 then 'Wednesday'
+when dayOfWeek = 4 then 'Thursday'
+when dayOfWeek = 5 then 'Friday'
+else 'Saturday' end as WeekdayName
+from dates;
+
+select * from dates where dayOfWeek not in (6,7);   		#TO find business days. Our solution.
+select * from dates;										#Full calender
+TRUNCATE TABLE dates;										#Use Truncate to clear 'dates' table. And run the Procedure query again for new dates/new calendar.
+
+
+CALL fill_date_dimension('1990-01-01', '2005-01-01');
+OPTIMIZE TABLE dates;
+
+
+
+
+
+
+# Question 44 solution
+# This problem took a lot of time. It was new, big. Even the solution didn't help as it was meant for SQL server.
+select * from employeepayhistory;					# This is the table we will be working on. Plus the calender table.
+SELECT employeeid FROM EmployeePayHistory			# Query to know which employees have gone Rate Change. Given in the book.
+GROUP BY employeeid									# Since my AdventureWorks DB is old, new datasets call employeeID as BusinessEntityID
+HAVING COUNT(*) > 1;
+
+SELECT *, ROW_NUMBER () OVER (PARTITION BY employeeID ORDER BY RateChangeDate) as BusinessEntityOrder, Null as RateEndDate, NULL as BusinessDays
+FROM EmployeePayHistory;
+select * from dates where dayOfWeek not in (6,7);
+
+Create table EmpPayHistory as
+(select *, 
+ROW_NUMBER () OVER (PARTITION BY employeeID ORDER BY RateChangeDate) as BusinessEntityOrder, 
+null as RateEndDate, null as BusinessDays from EmployeePayHistory);
+
+# Since I don't know what values will be filled in RateEndDate and BusinessDays columns, I have temporarily filled the columns with NULL values.
+# The MySQL CREATE TABLE AS statement is used to create a table from an existing table by copying the existing table's columns.
+# It is important to note that when creating a table in this way, the new table will be populated with the records from the existing table (based on the SELECT Statement).
+# The new table will take all the constraints of the original table too. But here we have two new columns RateEndDate and EmployeePayHistory.
+# By default, mysql will assign Binary datatype to these columns. We have to change this constraints using ALTER statement as shown below.
+
+
+alter table EmpPayHistory
+change column RateEndDate RateEndDate date;    			#Since we want date format fro RateEndDate. Now we can insert date values in these column
+alter table EmpPayHistory								#If you don't do this step, you will get 'Data too long' error when inserting new values.
+change column BusinessDays BusinessDays int;			#Since we want Integer format for BusinessDays. Now we can insert integer values in these column
+
+
+create table EmpPayHistory1 as (select * from EmpPayHistory);		#I created a clone because in the UPDATE statement you cannot use the EmpPayHistory table.
+
+select * from EmployeePayHistory;
+select * from EmpPayHistory;					#Check this query after every step to see the changes.
+select * from EmpPayHistory1;
+select * from dates;							#dates is our calendar table from previous problem.
+ 
+
+UPDATE EmpPayHistory E
+SET RateEndDate = 
+(select RateChangeDate from EmpPayHistory1 E1 where E1.EmployeeID = E.EmployeeID and E1.BusinessEntityOrder = E.BusinessEntityOrder + 1
+order by RateChangeDate							#Here, we used EmpPayHistory1, you cannot use EmpPayHistory. You get error. Therefore, the clone.
+limit 1 );
+
+UPDATE EmpPayHistory E
+SET BusinessDays = (SELECT COUNT(*) FROM dates d where d.fulldate between E.RateChangeDate and ifnull(E.RateEndDate, '2005-01-01') and d.weekend = 0);
+		#We are calculating the BusinessDays till 2005-01-01.
+
+
+SELECT *, Rate * 8 as DailyPay FROM EmpPayHistory E
+JOIN dates d ON d.fulldate >= E.RateChangeDate AND d.fullDate < IFNULL(E.RateEndDate, '2005-01-01') AND d.weekend = 0;
+
+SELECT employeeID, Year as WorkingYear, SUM(DailyPay) as TotalPay
+FROM
+	(SELECT *, Rate * 8 as DailyPay FROM EmpPayHistory E 
+	 JOIN dates d ON d.fulldate >= E.RateChangeDate AND d.fullDate < IFNULL(E.RateEndDate, '2005-01-01') AND d.weekend = 0) X
+WHERE Year BETWEEN 1996 AND 2004			#Change the years as per your wish.
+GROUP BY employeeID, Year
+ORDER BY employeeID, Year;
+
+
+
+#Question 45 solution
+
+select * from EmployeeDepartmentHistory;
+
+SELECT EDH.DepartmentID, EDH.StartDate, EDH.EndDate, EDH.*
+FROM EmployeeDepartmentHistory EDH
+LEFT JOIN 
+(SELECT *, Rate * 8 as DailyPay FROM EmpPayHistory eph 
+JOIN dates c ON c.fulldate >= eph.RateChangeDate AND c.fullDate < IFNULL(eph.RateEndDate, '2004-01-01') AND c.weekend = 0) X
+ON EDH.employeeID = X.employeeID
+AND X.fulldate BETWEEN
+EDH.StartDate AND IFNULL(EDH.EndDate, '2004-01-01');
+
+drop view employeepaydepartmentcalendar;
+create view EmployeePayDepartmentCalendar as 
+(SELECT EDH.DepartmentID, EDH.StartDate, EDH.EndDate, X.*
+FROM EmployeeDepartmentHistory EDH
+LEFT JOIN 
+(SELECT *, Rate * 8 as DailyPay FROM EmpPayHistory eph 
+JOIN dates c ON c.fulldate >= eph.RateChangeDate AND c.fullDate < IFNULL(eph.RateEndDate, '2005-01-01') AND c.weekend = 0) X
+ON EDH.employeeID = X.employeeID
+AND X.fulldate BETWEEN
+EDH.StartDate AND IFNULL(EDH.EndDate, '2005-01-01'));
+
+select * from employeepaydepartmentcalendar;
+SELECT DepartmentID, employeeID, SUM(DailyPay) as TotalPay FROM EmployeePayDepartmentCalendar
+WHERE Year = '2004'
+GROUP BY DepartmentID, employeeID;
+
+SELECT DepartmentID, MIN(TotalPay) as MinSalary, AVG(TotalPay) as AvgSalary, MAX(TotalPay) as MaxSalary
+FROM 
+(SELECT DepartmentID, employeeID, SUM(DailyPay) as TotalPay FROM EmployeePayDepartmentCalendar
+WHERE Year = '2004'
+GROUP BY DepartmentID, employeeID) X
+GROUP BY DepartmentID;
+
+
+
+
+
+
+
+# Question 46 solution
+select e.employeeID, c.firstname, c.lastname, e.title, 
+
+(SELECT Rate FROM EmployeePayHistory X
+WHERE e.employeeID = X.employeeID
+ORDER BY RateChangeDate DESC
+limit 1) * 50
+as bonus 
+
+from employee e 
+join contact c on e.employeeID = c.ContactID
+where e.SalariedFlag = 1
+order by EmployeeID;
+
+
+
+
+
+
+
+# Question 47 solution
+SELECT
+c.contactID, 
+concat(c.firstname,' ', c.lastname,
+	   case when suffix is null then '' 
+	   else concat(', ', suffix) end) as FullName,
+d.Name as Dept
+FROM contact c
+JOIN (SELECT employeeID, MAX(StartDate) as MaxStart FROM EmployeeDepartmentHistory GROUP BY employeeID) x
+ON c.contactID = x.employeeID
+
+JOIN EmployeeDepartmentHistory EDH ON x.MaxStart = EDH.StartDate
+AND x.employeeID = EDH.employeeID
+
+JOIN Department d
+ON EDH.DepartmentID = d.DepartmentID
+
+ORDER BY Dept, contactID;
+
+
+
+
+
+
+
+
+#Question 48 solution
+
+select * from Salespersonquotahistory;
+select * from contact;
+
+SELECT DISTINCT
+H.SalespersonID, c.LastName, 
+H2.SalesQuota as 'StartQuota-2002', 
+H3.SalesQuota as 'EndQuota-2003', 
+((H3.SalesQuota - H2.SalesQuota) / H2.SalesQuota * 100) as PercentChangeQuota
+FROM SalesPersonQuotaHistory H
+
+JOIN SalesPersonQuotaHistory H2 ON H.SalespersonID = H2.SalespersonID
+AND H2.QuotaDate = (SELECT MIN(QuotaDate) FROM SalesPersonQuotaHistory WHERE YEAR(QuotaDate) = '2002')
+
+JOIN SalesPersonQuotaHistory H3 ON H.SalespersonID = H3.SalespersonID 
+AND H3.QuotaDate = (SELECT MAX(QuotaDate) FROM SalesPersonQuotaHistory WHERE YEAR(QuotaDate) = '2003')
+
+JOIN contact c ON H.SalespersonID = c.contactID;
+
+
+
+
+
+
+
+
+#Question 49 solution
+
+select * from WorkOrder;
+select * from ScrapReason;
+select * from Product;
+
+select * from
+	(select w.WorkOrderID, w.duedate, p.name as ProductName, s.scrapreasonId, s.Name as ScrapReason, 
+	w.ScrappedQty, W.OrderQty, ((w.ScrappedQty/W.OrderQty)*100) as ScrapRate
+	from workorder w
+	join product p on w.productid = p.productid
+	join scrapreason s on w.ScrapReasonID = s.ScrapReasonID) x
+where ScrapRate > 3
+order by DueDate desc;
+
+#Solution
+With A as
+	(select *, percent_rank() over (order by Duedate desc ) as N from
+		
+        (select w.WorkOrderID, w.duedate, p.name as ProductName, s.scrapreasonId, s.Name as ScrapReason, 
+         w.ScrappedQty, W.OrderQty, ((w.ScrappedQty/W.OrderQty)*100) as ScrapRate
+		 from workorder w
+		 join product p on w.productid = p.productid
+		 join scrapreason s on w.ScrapReasonID = s.ScrapReasonID) x
+	
+    where ScrapRate > 3
+	order by DueDate desc)
+select *, Duedate from A where N <= 0.1
+;
+
+#Alternate Solution
+With A as
+	(select *, ntile(10) over (order by duedate desc) as Top10 from
+		
+        (select w.WorkOrderID, w.duedate, p.name as ProductName, s.scrapreasonId, s.Name as ScrapReason, 
+         w.ScrappedQty, W.OrderQty, ((w.ScrappedQty/W.OrderQty)*100) as ScrapRate
+		 from workorder w
+		 join product p on w.productid = p.productid
+		 join scrapreason s on w.ScrapReasonID = s.ScrapReasonID) x
+	
+    where ScrapRate > 3
+	order by DueDate desc)
+select *, Duedate from A where TOp10 = 1
+;
+
+
+
+
+
+
+
+#Question 50 solution
+
+select * from SalesOrderHeaderSalesReason;
+select * from salesreason;
+
+#Using Subquery
+SELECT ReasonName, ReasonInfluence, COUNT(*) as SalesOrderCount FROM 
+(SELECT so.SalesOrderID, sr.Name as ReasonName,
+		CASE
+		WHEN COUNT(soo.SalesOrderID) > 1 THEN 'Contributing Reason'
+		WHEN COUNT(soo.SalesOrderID) = 1 THEN 'Exclusive Reason' 
+        END as ReasonInfluence
+	FROM SalesOrderHeaderSalesReason SO
+JOIN SalesReason SR ON So.SalesReasonID = Sr.SalesReasonID
+JOIN SalesOrderHeaderSalesReason Soo ON so.SalesOrderID = soo.SalesOrderID
+GROUP BY so.SalesOrderID, sr.Name)x
+GROUP BY ReasonName, ReasonInfluence
+ORDER BY ReasonName, SalesOrderCount DESC;
+
+#Using With clause
+WITH Reasons AS
+	(SELECT so.SalesOrderID, sr.Name as ReasonName,
+		CASE
+		WHEN COUNT(soo.SalesOrderID) > 1 THEN 'Contributing Reason'
+		WHEN COUNT(soo.SalesOrderID) = 1 THEN 'Exclusive Reason' 
+        END as ReasonInfluence
+	FROM SalesOrderHeaderSalesReason SO
+JOIN SalesReason SR ON So.SalesReasonID = Sr.SalesReasonID
+JOIN SalesOrderHeaderSalesReason Soo ON so.SalesOrderID = soo.SalesOrderID
+GROUP BY so.SalesOrderID, sr.Name)
+SELECT ReasonName, ReasonInfluence, COUNT(*) as SalesOrderCount FROM Reasons
+GROUP BY ReasonName, ReasonInfluence
+ORDER BY ReasonName, SalesOrderCount DESC;
+
+
+#Question 51 solution
+
+select * from SalesOrderDetail;
+select * from specialoffer;
+    
+Select SpecialOfferID, Type, Description, Category, StartDate, EndDate, DiscountPct from SpecialOffer
+where Type = 'Excess Inventory';
+
+Select SpecialOfferID, Type, Description, Category, StartDate, EndDate, DiscountPct, 
+(select count(distinct x.SalesOrderID) FROM SalesOrderDetail x WHERE so.SpecialOfferID = x.SpecialOfferID)
+from SpecialOffer so
+where Type = 'Excess Inventory';
+
+
+#Question 52 solution
+
+select * from EmployeePayHistory;
+SELECT EmployeeID, RateChangeDate, ROW_NUMBER() OVER (PARTITION BY EmployeeID ORDER BY RateChangeDate DESC) as PayRateNumber from employeepayhistory;
+
+#Below two queries for some personal practice. Required solution is the last query.
+select employeeid, rate, ratechangedate from employeepayhistory as t
+where ratechangedate in (select max(RateChangeDate) from employeepayhistory t2 where t2.EmployeeID = t.EmployeeID);
+select t1.employeeid, rate, ratechangedate from employeepayhistory as t1 
+join
+(select employeeID, max(RateChangeDate) as maxdate from employeepayhistory
+group by EmployeeID) t2
+on t1.ratechangedate = t2.maxdate and t1.employeeid = t2.EmployeeID;
+
+
+#Required Solution
+With Data AS   
+	(SELECT EmployeeID, ROW_NUMBER() OVER (PARTITION BY EmployeeID ORDER BY RateChangeDate DESC) as PayRateNumber, 
+    RateChangeDate, Rate FROM EmployeePayHistory)
+SELECT N1.EmployeeID, N2.Rate as RatePrior, N1.Rate as LatestRate, (((N1.Rate - N2.Rate)*100)/N2.Rate) as PercentChange
+FROM Data N1 
+LEFT JOIN Data N2
+ON N1.EmployeeID = N2.EmployeeID AND N2.PayRateNumber = 2
+WHERE N1.PayRateNumber = 1;
